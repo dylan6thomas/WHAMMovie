@@ -10,7 +10,7 @@ from torch.nn import functional as F
 
 from ...utils import transforms
 
-__all__ = ['VideoAugmentor', 'SMPLAugmentor', 'SequenceAugmentor', 'CameraAugmentor']
+__all__ = ['VideoAugmentor', 'SMPLAugmentor', 'SequenceAugmentor', 'CameraAugmentor', 'CroppedCameraAugmentor']
 
 
 num_joints = _C.KEYPOINTS.NUM_JOINTS
@@ -288,5 +288,274 @@ class CameraAugmentor:
         
         if 'kp3d' in target:
             target['kp3d'] = torch.matmul(R, target['kp3d'].transpose(1, 2)).transpose(1, 2) + target['transl_cam'].unsqueeze(1)
+        
+        return target
+    
+class CroppedCameraAugmentor:
+    rx_factor = np.pi/8
+    ry_factor = np.pi/4
+    rz_factor = np.pi/8
+    
+    pitch_std = np.pi/8
+    pitch_mean = np.pi/36
+    roll_std = np.pi/24
+    t_factor = 1
+    
+    tz_scale = 10
+    tz_min = 2
+    
+    motion_prob = 0.75
+    interp_noise = 0.2
+    
+    def __init__(self, l, w, h, f):
+        self.l = l
+        self.w = w
+        self.h = h
+        self.f = f
+        self.fov_tol = 1.2 * (0.5 ** 0.5)
+        
+    def __call__(self, target):
+        
+        R, T = self.create_camera(target)
+        
+        if np.random.rand() < self.motion_prob:
+            R = self.create_rotation_move(R)
+            T = self.create_translation_move(T)
+        
+        return self.apply(target, R, T)
+        
+    def create_camera(self, target):
+        """Create the initial frame camera pose"""
+        yaw = np.random.rand() * 2 * np.pi
+        pitch = np.random.normal(scale=self.pitch_std) + self.pitch_mean
+        roll = np.random.normal(scale=self.roll_std)
+        
+        yaw_rm = transforms.axis_angle_to_matrix(torch.tensor([[0, yaw, 0]]).float())
+        pitch_rm = transforms.axis_angle_to_matrix(torch.tensor([[pitch, 0, 0]]).float())
+        roll_rm = transforms.axis_angle_to_matrix(torch.tensor([[0, 0, roll]]).float())
+        R = (roll_rm @ pitch_rm @ yaw_rm)
+        
+        # Place people in the scene
+        tz = np.random.rand() * self.tz_scale + self.tz_min
+        max_d = self.w * tz / self.f / 2
+        tx = np.random.normal(scale=0.25) * max_d
+        ty = np.random.normal(scale=0.25) * max_d
+        dist = torch.tensor([tx, ty, tz]).float()
+        T = dist - torch.matmul(R, target['transl'][0])
+        
+        return R.repeat(self.l, 1, 1), T.repeat(self.l, 1)
+    
+    def create_rotation_move(self, R):
+        """Create rotational move for the camera"""
+        
+        # Create final camera pose
+        rx = np.random.normal(scale=self.rx_factor)
+        ry = np.random.normal(scale=self.ry_factor)
+        rz = np.random.normal(scale=self.rz_factor)
+        Rf = R[0] @ transforms.axis_angle_to_matrix(torch.tensor([rx, ry, rz]).float())
+        
+        # Inbetweening two poses
+        Rs = torch.stack((R[0], Rf))
+        rs = transforms.matrix_to_rotation_6d(Rs).numpy() 
+        rs_move = self.noisy_interpolation(rs)
+        R_move = transforms.rotation_6d_to_matrix(torch.from_numpy(rs_move).float())
+        return R_move
+    
+    def create_translation_move(self, T):
+        """Create translational move for the camera"""
+        
+        # Create final camera position
+        tx = np.random.normal(scale=self.t_factor)
+        ty = np.random.normal(scale=self.t_factor)
+        tz = np.random.normal(scale=self.t_factor)
+        Ts = np.array([[0, 0, 0], [tx, ty, tz]])
+        
+        T_move = self.noisy_interpolation(Ts)
+        T_move = torch.from_numpy(T_move).float()
+        return T_move + T
+        
+    def noisy_interpolation(self, data):
+        """Non-linear interpolation with noise"""
+        
+        dim = data.shape[-1]
+        output = np.zeros((self.l, dim))
+        
+        linspace = np.stack([np.linspace(0, 1, self.l) for _ in range(dim)])
+        noise = (linspace[0, 1] - linspace[0, 0]) * self.interp_noise
+        space_noise = np.stack([np.random.uniform(-noise, noise, self.l - 2) for _ in range(dim)])
+        
+        linspace[:, 1:-1] = linspace[:, 1:-1] + space_noise
+        for i in range(dim):
+            output[:, i] = np.interp(linspace[i], np.array([0., 1.,]), data[:, i])
+        return output
+    
+    def apply(self, target, R, T):
+        target['R'] = R
+        target['T'] = T
+        
+        # Recompute the translation
+        transl_cam = torch.matmul(R, target['transl'].unsqueeze(-1)).squeeze(-1)
+        transl_cam = transl_cam + T
+        if transl_cam[..., 2].min() < 0.5:      # If the person is too close to the camera
+            transl_cam[..., 2] = transl_cam[..., 2] + (1.0 - transl_cam[..., 2].min())
+        
+        # If the subject is away from the field of view, put the camera behind
+        fov = torch.div(transl_cam[..., :2], transl_cam[..., 2:]).abs()
+        if fov.max() > self.fov_tol:
+            t_max = transl_cam[fov.max(1)[0].max(0)[1].item()]
+            z_trg = t_max[:2].abs().max(0)[0] / self.fov_tol
+            pad = z_trg - t_max[2]
+            transl_cam[..., 2] = transl_cam[..., 2] + pad
+        
+        target['transl_cam'] = transl_cam
+        
+        # Transform world coordinate to camera coordinate
+        target['pose_root'] = target['pose'][:, 0].clone()
+        target['pose'][:, 0] = R @ target['pose'][:, 0]  # pose
+        target['init_pose'][:, 0] = R[:1] @ target['init_pose'][:, 0]  # init pose
+        
+        # Compute angular velocity
+        cam_angvel = transforms.matrix_to_rotation_6d(R[:-1] @ R[1:].transpose(-1, -2))
+        cam_angvel = cam_angvel - torch.tensor([[1, 0, 0, 0, 1, 0]]).to(cam_angvel) # Normalize
+        target['cam_angvel'] = cam_angvel * 3e1 # assume 30-fps
+        
+        if 'kp3d' in target:
+            target['kp3d'] = torch.matmul(R, target['kp3d'].transpose(1, 2)).transpose(1, 2) + target['transl_cam'].unsqueeze(1)
+        
+        return target
+    
+class CroppedCameraAugmentor:
+    rx_factor = np.pi/8
+    ry_factor = np.pi/4
+    rz_factor = np.pi/8
+    
+    pitch_std = np.pi/8
+    pitch_mean = np.pi/36
+    roll_std = np.pi/24
+    t_factor = 1
+    
+    tz_scale = 10
+    tz_min = 2
+    
+    motion_prob = 0.75
+    interp_noise = 0.2
+    
+    def __init__(self, l, w, h, f):
+        self.l = l
+        self.w = w
+        self.h = h
+        self.f = f
+        self.fov_tol = 1.2 * (0.5 ** 0.5)
+        
+    def __call__(self, target):
+        
+        R, T = self.create_camera(target)
+        
+        if np.random.rand() < self.motion_prob:
+            R = self.create_rotation_move(R)
+            T = self.create_translation_move(T)
+        
+        return self.apply(target, R, T)
+        
+    def create_camera(self, target):
+        """Create the initial frame camera pose"""
+        yaw = np.random.rand() * 2 * np.pi
+        pitch = np.random.normal(scale=self.pitch_std) + self.pitch_mean
+        roll = np.random.normal(scale=self.roll_std)
+        
+        yaw_rm = transforms.axis_angle_to_matrix(torch.tensor([[0, yaw, 0]]).float())
+        pitch_rm = transforms.axis_angle_to_matrix(torch.tensor([[pitch, 0, 0]]).float())
+        roll_rm = transforms.axis_angle_to_matrix(torch.tensor([[0, 0, roll]]).float())
+        R = (roll_rm @ pitch_rm @ yaw_rm)
+        
+        # Place people in the scene
+        tz = np.random.rand() * self.tz_scale + self.tz_min
+        max_d = self.w * tz / self.f / 2
+        tx = np.random.normal(scale=0.25) * max_d
+        ty = np.random.normal(scale=0.25) * max_d
+        dist = torch.tensor([tx, ty, tz]).float()
+        T = dist - torch.matmul(R, target['transl'][0])
+        
+        return R.repeat(self.l, 1, 1), T.repeat(self.l, 1)
+    
+    def create_rotation_move(self, R):
+        """Create rotational move for the camera"""
+        
+        # Create final camera pose
+        rx = np.random.normal(scale=self.rx_factor)
+        ry = np.random.normal(scale=self.ry_factor)
+        rz = np.random.normal(scale=self.rz_factor)
+        Rf = R[0] @ transforms.axis_angle_to_matrix(torch.tensor([rx, ry, rz]).float())
+        
+        # Inbetweening two poses
+        Rs = torch.stack((R[0], Rf))
+        rs = transforms.matrix_to_rotation_6d(Rs).numpy() 
+        rs_move = self.noisy_interpolation(rs)
+        R_move = transforms.rotation_6d_to_matrix(torch.from_numpy(rs_move).float())
+        return R_move
+    
+    def create_translation_move(self, T):
+        """Create translational move for the camera"""
+        
+        # Create final camera position
+        tx = np.random.normal(scale=self.t_factor)
+        ty = np.random.normal(scale=self.t_factor)
+        tz = np.random.normal(scale=self.t_factor)
+        Ts = np.array([[0, 0, 0], [tx, ty, tz]])
+        
+        T_move = self.noisy_interpolation(Ts)
+        T_move = torch.from_numpy(T_move).float()
+        return T_move + T
+        
+    def noisy_interpolation(self, data):
+        """Non-linear interpolation with noise"""
+        
+        dim = data.shape[-1]
+        output = np.zeros((self.l, dim))
+        
+        linspace = np.stack([np.linspace(0, 1, self.l) for _ in range(dim)])
+        noise = (linspace[0, 1] - linspace[0, 0]) * self.interp_noise
+        space_noise = np.stack([np.random.uniform(-noise, noise, self.l - 2) for _ in range(dim)])
+        
+        linspace[:, 1:-1] = linspace[:, 1:-1] + space_noise
+        for i in range(dim):
+            output[:, i] = np.interp(linspace[i], np.array([0., 1.,]), data[:, i])
+        return output
+    
+    def apply(self, target, R, T):
+        target['R'] = R
+        target['T'] = T
+        
+        # Recompute the translation
+        transl_cam = torch.matmul(R, target['transl'].unsqueeze(-1)).squeeze(-1)
+        transl_cam = transl_cam + T
+        if transl_cam[..., 2].min() < 0.5:      # If the person is too close to the camera
+            transl_cam[..., 2] = transl_cam[..., 2] + (1.0 - transl_cam[..., 2].min())
+        
+        # If the subject is away from the field of view, put the camera behind
+        fov = torch.div(transl_cam[..., :2], transl_cam[..., 2:]).abs()
+
+        # Get the indices of the points that are out of FOV
+        out_of_fov_indices = fov.max(1)[0] > self.fov_tol
+
+        # Set the out-of-FOV points in transl_cam to (-1, -1, -1)
+        transl_cam[out_of_fov_indices] = torch.tensor([-1, -1, -1], dtype=torch.float32, device=transl_cam.device)
+        
+        target['transl_cam'] = transl_cam
+        
+        # Transform world coordinate to camera coordinate
+        target['pose_root'] = target['pose'][:, 0].clone()
+        target['pose'][:, 0] = R @ target['pose'][:, 0]  # pose
+        target['init_pose'][:, 0] = R[:1] @ target['init_pose'][:, 0]  # init pose
+        
+        # Compute angular velocity
+        cam_angvel = transforms.matrix_to_rotation_6d(R[:-1] @ R[1:].transpose(-1, -2))
+        cam_angvel = cam_angvel - torch.tensor([[1, 0, 0, 0, 1, 0]]).to(cam_angvel) # Normalize
+        target['cam_angvel'] = cam_angvel * 3e1 # assume 30-fps
+        
+        if 'kp3d' in target:
+            target['kp3d'] = torch.matmul(R, target['kp3d'].transpose(1, 2)).transpose(1, 2) + target['transl_cam'].unsqueeze(1)
+            # Mark out of fov indices as such
+            target['kp3d'][out_of_fov_indices] = torch.tensor([-1, -1, -1], dtype=torch.float32, device=target['kp3d'].device)
         
         return target

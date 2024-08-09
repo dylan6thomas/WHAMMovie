@@ -50,7 +50,7 @@ class AMASSDataset(BaseDataset):
         self.img_w, self.img_h = 1000, 1000
         self.get_naive_intrinsics((self.img_w, self.img_h))
         
-        self.CameraAugmentor = CameraAugmentor(cfg.DATASET.SEQLEN + 1, self.img_w, self.img_h, self.focal_length)
+        self.CameraAugmentor = CroppedCameraAugmentor(cfg.DATASET.SEQLEN + 1, self.img_w, self.img_h, self.focal_length)
         
         
     @property
