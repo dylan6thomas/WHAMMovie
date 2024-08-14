@@ -50,7 +50,7 @@ class AMASSDataset(BaseDataset):
         self.img_w, self.img_h = 1000, 1000
         self.get_naive_intrinsics((self.img_w, self.img_h))
         
-        self.CameraAugmentor = CroppedCameraAugmentor(cfg.DATASET.SEQLEN + 1, self.img_w, self.img_h, self.focal_length)
+        self.CameraAugmentor = CameraAugmentor(cfg.DATASET.SEQLEN + 1, self.img_w, self.img_h, self.focal_length)
         
         
     @property
@@ -62,11 +62,14 @@ class AMASSDataset(BaseDataset):
         inpt_kp3d = self.VideoAugmentor(gt_kp3d[:, :self.n_joints, :-1].clone())
         kp2d = perspective_projection(inpt_kp3d, self.cam_intrinsics)
         mask = self.VideoAugmentor.get_mask()
+        confidence = self.VideoAugmentor.mask2confidence(mask)
         kp2d, bbox = self.keypoints_normalizer(kp2d, target['res'], self.cam_intrinsics, 224, 224)    
         
         target['bbox'] = bbox[1:]
         target['kp2d'] = kp2d
         target['mask'] = mask[1:]
+        target['confidence'] = confidence
+        
         target['features'] = torch.zeros((self.SMPLAugmentor.n_frames, self.d_img_feature)).float()
         return target
     
