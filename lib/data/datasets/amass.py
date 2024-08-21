@@ -50,7 +50,7 @@ class AMASSDataset(BaseDataset):
         self.img_w, self.img_h = 1000, 1000
         self.get_naive_intrinsics((self.img_w, self.img_h))
         
-        self.CameraAugmentor = CameraAugmentor(cfg.DATASET.SEQLEN + 1, self.img_w, self.img_h, self.focal_length)
+        self.CameraAugmentor = CroppedCameraAugmentor(cfg.DATASET.SEQLEN + 1, self.img_w, self.img_h, self.focal_length)
         
         
     @property
@@ -60,15 +60,17 @@ class AMASSDataset(BaseDataset):
     def get_input(self, target):
         gt_kp3d = target['kp3d']
         inpt_kp3d = self.VideoAugmentor(gt_kp3d[:, :self.n_joints, :-1].clone())
+        
         kp2d = perspective_projection(inpt_kp3d, self.cam_intrinsics)
         mask = self.VideoAugmentor.get_mask()
-        confidence = self.VideoAugmentor.mask2confidence(mask)
         kp2d, bbox = self.keypoints_normalizer(kp2d, target['res'], self.cam_intrinsics, 224, 224)    
         
         target['bbox'] = bbox[1:]
         target['kp2d'] = kp2d
+        # print("KP2D Shape: ", kp2d.shape)
+        # print("KP3D SHAPE: ", inpt_kp3d.shape)
+        # print("GT KP3D SHAPE: ", gt_kp3d.shape)
         target['mask'] = mask[1:]
-        target['confidence'] = confidence
         
         target['features'] = torch.zeros((self.SMPLAugmentor.n_frames, self.d_img_feature)).float()
         return target
@@ -77,6 +79,10 @@ class AMASSDataset(BaseDataset):
         # GT 1. Joints
         gt_kp3d = target['kp3d']
         gt_kp2d = perspective_projection(gt_kp3d, self.cam_intrinsics)
+        # print("gt_kp2d ", gt_kp2d)
+        # print("KP2D shape: ", gt_kp2d.shape)
+        # print("MIN X and Y", gt_kp2d.min(1))
+        # print("MAX X and Y", gt_kp2d.max(1))
         target['kp3d'] = torch.cat((gt_kp3d, torch.ones_like(gt_kp3d[..., :1]) * float(self.supervise_pose)), dim=-1)
         target['full_kp2d'] = torch.cat((gt_kp2d, torch.ones_like(gt_kp2d[..., :1]) * float(self.supervise_pose)), dim=-1)[1:]
         target['weak_kp2d'] = torch.zeros_like(target['full_kp2d'])

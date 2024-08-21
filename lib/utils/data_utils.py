@@ -32,6 +32,8 @@ def prepare_keypoints_data(target):
     target['kp2d'] = target['kp2d'][1:]
     if 'kp3d' in target:
         target['kp3d'] = target['kp3d'][1:]
+    if 'confidence' in target:
+        target['confidence'] = target['confidence'][1:]
 
     return target
 

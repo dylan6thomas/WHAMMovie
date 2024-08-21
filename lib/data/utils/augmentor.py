@@ -10,7 +10,7 @@ from torch.nn import functional as F
 
 from ...utils import transforms
 
-__all__ = ['VideoAugmentor', 'SMPLAugmentor', 'SequenceAugmentor', 'CameraAugmentor']
+__all__ = ['VideoAugmentor', 'SMPLAugmentor', 'SequenceAugmentor', 'CameraAugmentor', 'CroppedCameraAugmentor']
 
 
 num_joints = _C.KEYPOINTS.NUM_JOINTS
@@ -419,6 +419,20 @@ class CroppedCameraAugmentor:
             output[:, i] = np.interp(linspace[i], np.array([0., 1.,]), data[:, i])
         return output
     
+    def get_confidence(self, target):
+        # confidence = torch.tensor((target['kp3d'].shape[1], 24), dtype=torch.float32)
+
+        fov = target["kp3d"][:,:,:2] / target["kp3d"][:,:,2].unsqueeze(-1)
+
+        # print("EXPECTED: ", target["kp3d"][0,0,0]/target["kp3d"][0,0,2], target["kp3d"][0,0,1]/target["kp3d"][0,0,2])
+        # print("ACTUAL: ", fov[0,0,:])
+        # print(target["kp3d"].shape)
+
+        confidence = (fov.max(2)[0] < self.fov_tol).float()
+
+        return confidence
+
+    
     def apply(self, target, R, T):
         target['R'] = R
         target['T'] = T
@@ -428,14 +442,6 @@ class CroppedCameraAugmentor:
         transl_cam = transl_cam + T
         if transl_cam[..., 2].min() < 0.5:      # If the person is too close to the camera
             transl_cam[..., 2] = transl_cam[..., 2] + (1.0 - transl_cam[..., 2].min())
-        
-        # If the subject is away from the field of view, put the camera behind
-        fov = torch.div(transl_cam[..., :2], transl_cam[..., 2:]).abs()
-        if fov.max() > self.fov_tol:
-            t_max = transl_cam[fov.max(1)[0].max(0)[1].item()]
-            z_trg = t_max[:2].abs().max(0)[0] / self.fov_tol
-            pad = z_trg - t_max[2]
-            transl_cam[..., 2] = transl_cam[..., 2] + pad
         
         target['transl_cam'] = transl_cam
         
@@ -450,6 +456,10 @@ class CroppedCameraAugmentor:
         target['cam_angvel'] = cam_angvel * 3e1 # assume 30-fps
         
         if 'kp3d' in target:
-            target['kp3d'] = torch.matmul(R, target['kp3d'].transpose(1, 2)).transpose(1, 2) + target['transl_cam'].unsqueeze(1)
-        
+            target['kp3d'] = torch.matmul(R, target['kp3d'].transpose(1, 2)).transpose(1, 2) + target['transl_cam'].unsqueeze(1)   
+
+        # Create confidence based on whether or not the joints are in view
+        confidence = self.get_confidence(target)
+        target['confidence3d'] = confidence
+
         return target
