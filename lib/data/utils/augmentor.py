@@ -460,6 +460,6 @@ class CroppedCameraAugmentor:
 
         # Create confidence based on whether or not the joints are in view
         confidence = self.get_confidence(target)
-        target['confidence3d'] = confidence
+        target['confidence'] = confidence
 
         return target
