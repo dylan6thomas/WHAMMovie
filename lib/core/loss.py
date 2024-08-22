@@ -35,6 +35,7 @@ class WHAMLoss(nn.Module):
         self.sliding_loss_weight = cfg.LOSS.SLIDING_LOSS_WEIGHT
         self.camera_loss_weight = cfg.LOSS.CAMERA_LOSS_WEIGHT
         self.loss_weight = cfg.LOSS.LOSS_WEIGHT
+        self.confidence_loss_weight = 3
         
         kp_weights = [
             0.5, 0.5, 0.5, 0.5, 0.5, # Face
@@ -82,6 +83,7 @@ class WHAMLoss(nn.Module):
         pred_vel_root_ref = pred['vel_root_refined']
         pred_pose_root_ref = pred['poses_root_r6d_refined'][:, 1:]
         pred_cam_r = transforms.matrix_to_rotation_6d(pred['R'])
+        pred_confidence = pred['confidence_nn']
         
         gt_betas = gt['betas']
         gt_pose = gt['pose']
@@ -93,6 +95,7 @@ class WHAMLoss(nn.Module):
         gt_pose_root = gt['pose_root'][:, 1:]
         gt_cam_angvel = gt['cam_angvel']
         gt_cam_r = transforms.matrix_to_rotation_6d(gt['R'][:, 1:])
+        gt_confidence = gt['confidence']
         bbox = gt['bbox']
         # =======>
         
@@ -101,6 +104,8 @@ class WHAMLoss(nn.Module):
             gt_full_kp2d, 
             bbox, 
             self.kp_weights, 
+            pred_confidence,
+            gt_confidence,
             criterion=self.criterion_noreduce, 
         )
         
@@ -108,6 +113,8 @@ class WHAMLoss(nn.Module):
             pred_weak_kp2d,
             gt_weak_kp2d,
             self.kp_weights,
+            pred_confidence,
+            gt_confidence,
             criterion=self.criterion_noreduce
         )
 
@@ -116,6 +123,8 @@ class WHAMLoss(nn.Module):
             pred_kp3d_nn,
             gt_kp3d[:, :, :self.n_joints],
             self.kp_weights[:, :self.n_joints],
+            pred_confidence[:, :, :self.n_joints],
+            gt_confidence[:, :, :self.n_joints],
             criterion=self.criterion_noreduce,
         )
         
@@ -123,6 +132,8 @@ class WHAMLoss(nn.Module):
             pred_kp3d_smpl,
             gt_kp3d,
             self.kp_weights,
+            pred_confidence,
+            gt_confidence,
             criterion=self.criterion_noreduce,
         )
         
@@ -130,6 +141,8 @@ class WHAMLoss(nn.Module):
             pred_kp3d_nn,
             torch.cat((pred_kp3d_smpl[:, :, :self.n_joints], gt_kp3d[:, :, :self.n_joints, -1:]), dim=-1),
             self.kp_weights[:, :self.n_joints] * 0.5,
+            pred_confidence[:, :, :self.n_joints],
+            gt_confidence[:, :, :self.n_joints],
             criterion=self.criterion_noreduce,
         )
         
@@ -200,7 +213,12 @@ class WHAMLoss(nn.Module):
             pred['feet_refined'],
             gt_contact,
         )
-                
+
+        loss_confidence = out_of_frame_loss(
+            pred_confidence, 
+            gt_confidence,
+        )
+
         loss_keypoints = loss_keypoints_full + loss_keypoints_weak
         loss_keypoints *= self.keypoint_2d_loss_weight
         loss_keypoints_3d_smpl *= self.keypoint_3d_loss_weight
@@ -218,6 +236,8 @@ class WHAMLoss(nn.Module):
         loss_camera *= self.camera_loss_weight
         loss_sliding_ref *= self.sliding_loss_weight
 
+        loss_confidence *= self.confidence_loss_weight
+
         loss_dict = {
             'pose': loss_regr_pose * self.loss_weight,
             'betas': loss_regr_betas * self.loss_weight,
@@ -232,6 +252,7 @@ class WHAMLoss(nn.Module):
             'sliding': loss_sliding * self.loss_weight,
             'camera': loss_camera * self.loss_weight,
             'sliding_ref': loss_sliding_ref * self.loss_weight,
+            'out_of_frame': loss_confidence * self.loss_weight,
         }
         
         loss = sum(loss for loss in loss_dict.values())
@@ -295,18 +316,24 @@ def full_projected_keypoint_loss(
         gt_keypoints_2d,
         bbox,
         weight,
+        pred_confidence,
+        gt_confidence,
         criterion,
 ):
     
     scale = bbox[..., 2:] * 200.
     conf = gt_keypoints_2d[..., -1]
+
+    gt_confidence_expanded = gt_confidence.unsqueeze(-1)
+    pred_confidence_expanded = pred_confidence.unsqueeze(-1)
     
     if (conf > 0).any():
         loss = torch.mean(
-            weight * (conf * torch.norm(pred_keypoints_2d - gt_keypoints_2d[..., :2], dim=-1)
+            weight * (conf * torch.norm((pred_keypoints_2d - gt_keypoints_2d[..., :2]) * gt_confidence_expanded * (2-pred_confidence_expanded), dim=-1)
         ) / scale, dim=1).mean() * conf.mean()
     else:
         loss = torch.FloatTensor(1).fill_(0.).to(gt_keypoints_2d.device)[0]
+
     return loss
 
 
@@ -314,13 +341,19 @@ def weak_projected_keypoint_loss(
         pred_keypoints_2d,
         gt_keypoints_2d,
         weight,
+        pred_confidence,
+        gt_confidence,
         criterion,
 ):
     
     conf = gt_keypoints_2d[..., -1]
+
+    gt_confidence_expanded = gt_confidence.unsqueeze(-1)
+    pred_confidence_expanded = pred_confidence.unsqueeze(-1)
+
     if (conf > 0).any():
         loss = torch.mean(
-            weight * (conf * torch.norm(pred_keypoints_2d - gt_keypoints_2d[..., :2], dim=-1)
+            weight * (conf * torch.norm((pred_keypoints_2d - gt_keypoints_2d[..., :2]) * gt_confidence_expanded * (2-pred_confidence_expanded), dim=-1)
         ), dim=1).mean() * conf.mean() * 5
     else:
         loss = torch.FloatTensor(1).fill_(0.).to(gt_keypoints_2d.device)[0]
@@ -331,17 +364,23 @@ def keypoint_3d_loss(
         pred_keypoints_3d,
         gt_keypoints_3d,
         weight,
+        pred_confidence,
+        gt_confidence,
         criterion,
 ):
     
     conf = gt_keypoints_3d[..., -1]
+
+    gt_confidence_expanded = gt_confidence.unsqueeze(-1)
+    pred_confidence_expanded = pred_confidence.unsqueeze(-1)
+
     if (conf > 0).any():
         if weight.shape[-2] > 17:
             pred_keypoints_3d[..., -14:] = pred_keypoints_3d[..., -14:] - pred_keypoints_3d[..., -14:].mean(dim=-2, keepdims=True)
             gt_keypoints_3d[..., -14:] = gt_keypoints_3d[..., -14:] - gt_keypoints_3d[..., -14:].mean(dim=-2, keepdims=True)
         
         loss = torch.mean(
-            weight * (conf * torch.norm(pred_keypoints_3d - gt_keypoints_3d[..., :3], dim=-1)
+            weight * (conf * torch.norm((pred_keypoints_3d - gt_keypoints_3d[..., :3]) * gt_confidence_expanded * (2-pred_confidence_expanded), dim=-1)
         ), dim=1).mean() * conf.mean()
     else:
         loss = torch.FloatTensor(1).fill_(0.).to(gt_keypoints_3d.device)[0]
@@ -436,3 +475,9 @@ def sliding_loss(
     foot_velocity = foot_position[:, 1:] - foot_position[:, :-1]
     loss = (torch.norm(foot_velocity, dim=-1) * contact_mask[:, 1:]).mean()
     return loss
+
+def out_of_frame_loss(
+        pred_conf,
+        gt_conf
+):
+    return F.binary_cross_entropy_with_logits(pred_conf, gt_conf.float())

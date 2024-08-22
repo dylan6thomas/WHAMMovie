@@ -218,7 +218,7 @@ def prepare_groundtruth(batch, device):
     gt_keys = ['pose', 'cam', 'betas', 'kp3d', 'bbox']          # Evaluation
     gt_keys += ['pose_root', 'vel_root', 'weak_kp2d', 'verts',  # Training
                 'full_kp2d', 'contact', 'R', 'cam_angvel',
-                'has_smpl', 'has_traj', 'has_full_screen', 'has_verts']
+                'has_smpl', 'has_traj', 'has_full_screen', 'has_verts', 'confidence']
     for gt_key in gt_keys:
         if gt_key in batch.keys():
             dtype = torch.float32 if batch[gt_key].dtype == torch.float64 else batch[gt_key].dtype
@@ -228,7 +228,7 @@ def prepare_groundtruth(batch, device):
 
 def prepare_auxiliary(batch, device):
     aux = dict()
-    aux_keys = ['mask', 'bbox', 'res', 'cam_intrinsics', 'init_root', 'cam_angvel']
+    aux_keys = ['mask', 'bbox', 'res', 'cam_intrinsics', 'init_root', 'cam_angvel', 'conf_mask']
     for key in aux_keys:
         if key in batch.keys():
             dtype = torch.float32 if batch[key].dtype == torch.float64 else batch[key].dtype

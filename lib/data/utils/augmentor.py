@@ -428,7 +428,7 @@ class CroppedCameraAugmentor:
         # print("ACTUAL: ", fov[0,0,:])
         # print(target["kp3d"].shape)
 
-        confidence = (fov.max(2)[0] < self.fov_tol).float()
+        confidence = (fov.max(2)[0] < self.fov_tol)
 
         return confidence
 

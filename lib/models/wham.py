@@ -97,6 +97,7 @@ class Network(nn.Module):
                 'full_kp2d': self.output.full_joints2d,
                 'weak_kp2d': self.output.weak_joints2d,
                 'R': cam_R,
+                'confidence_nn': self.pred_confidence
             })
         else:
             output.update({
@@ -156,9 +157,14 @@ class Network(nn.Module):
         
     
     def forward(self, x, inits, img_features=None, mask=None, init_root=None, cam_angvel=None,
-                cam_intrinsics=None, bbox=None, res=None, return_y_up=False, refine_traj=True, **kwargs):
+                cam_intrinsics=None, bbox=None, res=None, return_y_up=False, refine_traj=True, conf_mask=None, **kwargs):
 
-        x = self.preprocess(x, mask)
+        if(conf_mask is not None):
+            full_mask = (mask | conf_mask)
+            x = self.preprocess(x, full_mask)
+        else:
+            x = self.preprocess(x, mask)
+
         init_kp, init_smpl = inits
         
         # --------- Inference --------- #
@@ -174,7 +180,7 @@ class Network(nn.Module):
             motion_context = self.integrator(motion_context, img_features)
             
         # Stage 4. Decode SMPL motion
-        pred_pose, pred_shape, pred_cam, pred_contact = self.motion_decoder(motion_context, init_smpl)
+        pred_pose, pred_shape, pred_cam, pred_contact, pred_confidence = self.motion_decoder(motion_context, init_smpl)
         # --------- #
         
         # --------- Register predictions --------- #
@@ -185,6 +191,7 @@ class Network(nn.Module):
         self.pred_shape = pred_shape
         self.pred_cam = pred_cam
         self.pred_contact = pred_contact
+        self.pred_confidence = pred_confidence
         # --------- #
         
         # --------- Build SMPL --------- #

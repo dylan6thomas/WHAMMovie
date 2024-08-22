@@ -104,6 +104,7 @@ class Trainer():
         losses = AverageMeter()
         kp_2d_loss = AverageMeter()
         kp_3d_loss = AverageMeter()
+        confidence_loss = AverageMeter()
 
         timer = {
             'data': 0,
@@ -145,6 +146,7 @@ class Trainer():
             losses.update(total_loss.item(), x.size(0))
             kp_2d_loss.update(loss_dict['2d'].item(), x.size(0))
             kp_3d_loss.update(loss_dict['3d'].item(), x.size(0))
+            confidence_loss.update(loss_dict['out_of_frame'].item(), x.size(0))
             
             timer['backward'] = time.time() - start
             timer['batch'] = timer['data'] + timer['forward'] + timer['loss'] + timer['backward']
@@ -152,7 +154,8 @@ class Trainer():
 
             summary_string = f'({i + 1}/{len(self.train_loader)}) | Total: {bar.elapsed_td} ' \
                             f'| loss: {losses.avg:.2f} | 2d: {kp_2d_loss.avg:.2f} ' \
-                            f'| 3d: {kp_3d_loss.avg:.2f} '
+                            f'| 3d: {kp_3d_loss.avg:.2f} ' \
+                            f'| out of frame conf: {confidence_loss.avg:.2f} '
 
             for k, v in loss_dict.items():
                 if k in self.summary_loss_keys: 

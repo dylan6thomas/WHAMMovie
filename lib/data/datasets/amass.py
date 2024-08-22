@@ -64,6 +64,8 @@ class AMASSDataset(BaseDataset):
         kp2d = perspective_projection(inpt_kp3d, self.cam_intrinsics)
         mask = self.VideoAugmentor.get_mask()
         kp2d, bbox = self.keypoints_normalizer(kp2d, target['res'], self.cam_intrinsics, 224, 224)    
+
+        conf_mask = (~target['confidence'][:,:self.n_joints]).clone()
         
         target['bbox'] = bbox[1:]
         target['kp2d'] = kp2d
@@ -71,6 +73,7 @@ class AMASSDataset(BaseDataset):
         # print("KP3D SHAPE: ", inpt_kp3d.shape)
         # print("GT KP3D SHAPE: ", gt_kp3d.shape)
         target['mask'] = mask[1:]
+        target['conf_mask'] = conf_mask[1:]
         
         target['features'] = torch.zeros((self.SMPLAugmentor.n_frames, self.d_img_feature)).float()
         return target
