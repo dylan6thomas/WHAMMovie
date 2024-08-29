@@ -28,6 +28,10 @@ m2mm = 1e3
 smplx2smpl = torch.from_numpy(joblib.load(_C.BMODEL.SMPLX2SMPL)['matrix']).unsqueeze(0).float().cuda()
 @torch.no_grad()
 def main(cfg, args):
+
+    # Flipped data is not in data for some reason?
+    cfg.FLIP_EVAL = False
+
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
     

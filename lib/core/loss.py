@@ -95,7 +95,10 @@ class WHAMLoss(nn.Module):
         gt_pose_root = gt['pose_root'][:, 1:]
         gt_cam_angvel = gt['cam_angvel']
         gt_cam_r = transforms.matrix_to_rotation_6d(gt['R'][:, 1:])
-        gt_confidence = gt['confidence']
+
+        # Perform label smoothing to prevent the model from becoming too confident, preventing NaN values
+        # gt_confidence = gt['confidence'] * (1 - 0.01) + 0.01 / 2
+        gt_confidence = gt['confidence'] if 'confidence' in gt.keys() else torch.ones(pred_confidence.shape) * -1
         bbox = gt['bbox']
         # =======>
         
@@ -324,6 +327,17 @@ def full_projected_keypoint_loss(
     scale = bbox[..., 2:] * 200.
     conf = gt_keypoints_2d[..., -1]
 
+    if (gt_confidence < 0).any():
+        if (conf > 0).any():
+            loss = torch.mean(
+                weight * (conf * torch.norm(pred_keypoints_2d - gt_keypoints_2d[..., :2], dim=-1)
+            ) / scale, dim=1).mean() * conf.mean()
+        else:
+            loss = torch.FloatTensor(1).fill_(0.).to(gt_keypoints_2d.device)[0]
+
+        return loss
+
+
     gt_confidence_expanded = gt_confidence.unsqueeze(-1)
     pred_confidence_expanded = pred_confidence.unsqueeze(-1)
     
@@ -348,6 +362,16 @@ def weak_projected_keypoint_loss(
     
     conf = gt_keypoints_2d[..., -1]
 
+    if (gt_confidence < 0).any():
+        if (conf > 0).any():
+            loss = torch.mean(
+                weight * (conf * torch.norm(pred_keypoints_2d - gt_keypoints_2d[..., :2], dim=-1)
+            ), dim=1).mean() * conf.mean() * 5
+        else:
+            loss = torch.FloatTensor(1).fill_(0.).to(gt_keypoints_2d.device)[0]
+            
+        return loss
+
     gt_confidence_expanded = gt_confidence.unsqueeze(-1)
     pred_confidence_expanded = pred_confidence.unsqueeze(-1)
 
@@ -370,6 +394,19 @@ def keypoint_3d_loss(
 ):
     
     conf = gt_keypoints_3d[..., -1]
+
+    if (gt_confidence < 0).any():
+        if (conf > 0).any():
+            if weight.shape[-2] > 17:
+                pred_keypoints_3d[..., -14:] = pred_keypoints_3d[..., -14:] - pred_keypoints_3d[..., -14:].mean(dim=-2, keepdims=True)
+                gt_keypoints_3d[..., -14:] = gt_keypoints_3d[..., -14:] - gt_keypoints_3d[..., -14:].mean(dim=-2, keepdims=True)
+            
+            loss = torch.mean(
+                weight * (conf * torch.norm(pred_keypoints_3d - gt_keypoints_3d[..., :3], dim=-1)
+            ), dim=1).mean() * conf.mean()
+        else:
+            loss = torch.FloatTensor(1).fill_(0.).to(gt_keypoints_3d.device)[0]
+        return loss
 
     gt_confidence_expanded = gt_confidence.unsqueeze(-1)
     pred_confidence_expanded = pred_confidence.unsqueeze(-1)
@@ -478,6 +515,9 @@ def sliding_loss(
 
 def out_of_frame_loss(
         pred_conf,
-        gt_conf
+        gt_conf,
 ):
-    return F.binary_cross_entropy_with_logits(pred_conf, gt_conf.float())
+    if (gt_conf > 0).any():
+        return F.binary_cross_entropy(pred_conf, gt_conf.float())
+    else:
+        return torch.tensor(0)
