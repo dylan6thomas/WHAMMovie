@@ -440,8 +440,8 @@ class CroppedCameraAugmentor:
         # Recompute the translation
         transl_cam = torch.matmul(R, target['transl'].unsqueeze(-1)).squeeze(-1)
         transl_cam = transl_cam + T
-        if transl_cam[..., 2].min() < 0.5:      # If the person is too close to the camera
-            transl_cam[..., 2] = transl_cam[..., 2] + (1.0 - transl_cam[..., 2].min())
+        if transl_cam[..., 2].min() < 0.1:      # If the person is too close to the camera
+            transl_cam[..., 2] = transl_cam[..., 2] + (5.0 - transl_cam[..., 2].min())
         
         target['transl_cam'] = transl_cam
         
