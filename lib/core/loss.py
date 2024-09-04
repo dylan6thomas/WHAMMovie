@@ -76,11 +76,11 @@ class WHAMLoss(nn.Module):
         pred_kp3d_smpl = root_centering(pred['kp3d'].reshape(b, f, -1, 3))
         pred_full_kp2d = pred['full_kp2d']
         pred_weak_kp2d = pred['weak_kp2d']
-        pred_contact = pred['contact']
+        # pred_contact = pred['contact']
         pred_vel_root = pred['vel_root']
         pred_pose_root = pred['poses_root_r6d'][:, 1:]
-        pred_vel_root_ref = pred['vel_root_refined']
-        pred_pose_root_ref = pred['poses_root_r6d_refined'][:, 1:]
+        # pred_vel_root_ref = pred['vel_root_refined']
+        # pred_pose_root_ref = pred['poses_root_r6d_refined'][:, 1:]
         pred_cam_r = transforms.matrix_to_rotation_6d(pred['R'])
         
         gt_betas = gt['betas']
@@ -88,7 +88,7 @@ class WHAMLoss(nn.Module):
         gt_kp3d = root_centering(gt['kp3d'])
         gt_full_kp2d = gt['full_kp2d']
         gt_weak_kp2d = gt['weak_kp2d']
-        gt_contact = gt['contact']
+        # gt_contact = gt['contact']
         gt_vel_root = gt['vel_root']
         gt_pose_root = gt['pose_root'][:, 1:]
         gt_cam_angvel = gt['cam_angvel']
@@ -153,11 +153,11 @@ class WHAMLoss(nn.Module):
         )
         
         # Compute loss on foot contact
-        loss_contact = contact_loss(
-            pred_contact,
-            gt_contact,
-            self.criterion_noreduce
-        )
+        # loss_contact = contact_loss(
+        #     pred_contact,
+        #     gt_contact,
+        #     self.criterion_noreduce
+        # )
         
         # Compute loss on root velocity and angular velocity
         loss_vel_root, loss_pose_root = root_loss(
@@ -165,19 +165,19 @@ class WHAMLoss(nn.Module):
             pred_pose_root,
             gt_vel_root,
             gt_pose_root,
-            gt_contact,
+            # gt_contact,
             self.criterion_noreduce
         )
         
         # Root loss after trajectory refinement
-        loss_vel_root_ref, loss_pose_root_ref = root_loss(
-            pred_vel_root_ref, 
-            pred_pose_root_ref,
-            gt_vel_root,
-            gt_pose_root,
-            gt_contact,
-            self.criterion_noreduce
-        )
+        # loss_vel_root_ref, loss_pose_root_ref = root_loss(
+        #     pred_vel_root_ref, 
+        #     pred_pose_root_ref,
+        #     gt_vel_root,
+        #     gt_pose_root,
+        #     # gt_contact,
+        #     self.criterion_noreduce
+        # )
         
         # Camera prediction loss
         loss_camera = camera_loss(
@@ -190,16 +190,16 @@ class WHAMLoss(nn.Module):
         )
                 
         # Foot sliding loss
-        loss_sliding = sliding_loss(
-            pred['feet'],
-            gt_contact,
-        )
+        # loss_sliding = sliding_loss(
+        #     pred['feet'],
+        #     gt_contact,
+        # )
         
         # Foot sliding loss
-        loss_sliding_ref = sliding_loss(
-            pred['feet_refined'],
-            gt_contact,
-        )
+        # loss_sliding_ref = sliding_loss(
+        #     pred['feet_refined'],
+        #     gt_contact,
+        # )
                 
         loss_keypoints = loss_keypoints_full + loss_keypoints_weak
         loss_keypoints *= self.keypoint_2d_loss_weight
@@ -207,16 +207,16 @@ class WHAMLoss(nn.Module):
         loss_keypoints_3d_nn *= self.keypoint_3d_loss_weight
         loss_cascaded *= self.cascaded_loss_weight
         loss_vertices *= self.vertices_loss_weight
-        loss_contact *= self.contact_loss_weight
+        # loss_contact *= self.contact_loss_weight
         loss_root = loss_vel_root * self.root_vel_loss_weight + loss_pose_root * self.root_pose_loss_weight
-        loss_root_ref = loss_vel_root_ref * self.root_vel_loss_weight + loss_pose_root_ref * self.root_pose_loss_weight
+        # loss_root_ref = loss_vel_root_ref * self.root_vel_loss_weight + loss_pose_root_ref * self.root_pose_loss_weight
 
         loss_regr_pose *= self.pose_loss_weight
         loss_regr_betas *= self.shape_loss_weight
         
-        loss_sliding *= self.sliding_loss_weight
+        # loss_sliding *= self.sliding_loss_weight
         loss_camera *= self.camera_loss_weight
-        loss_sliding_ref *= self.sliding_loss_weight
+        # loss_sliding_ref *= self.sliding_loss_weight
 
         loss_dict = {
             'pose': loss_regr_pose * self.loss_weight,
@@ -226,12 +226,12 @@ class WHAMLoss(nn.Module):
             '3d_nn': loss_keypoints_3d_nn * self.loss_weight,
             'casc': loss_cascaded * self.loss_weight,
             'v3d': loss_vertices * self.loss_weight,
-            'contact': loss_contact * self.loss_weight,
+            # 'contact': loss_contact * self.loss_weight,
             'root': loss_root * self.loss_weight,
-            'root_ref': loss_root_ref * self.loss_weight,
-            'sliding': loss_sliding * self.loss_weight,
+            # 'root_ref': loss_root_ref * self.loss_weight,
+            # 'sliding': loss_sliding * self.loss_weight,
             'camera': loss_camera * self.loss_weight,
-            'sliding_ref': loss_sliding_ref * self.loss_weight,
+            # 'sliding_ref': loss_sliding_ref * self.loss_weight,
         }
         
         loss = sum(loss for loss in loss_dict.values())
@@ -244,14 +244,14 @@ def root_loss(
     pred_pose_root,
     gt_vel_root,
     gt_pose_root,
-    stationary,
+    # stationary,
     criterion
 ):
     
     mask_r = (gt_pose_root != 0.0).all(dim=-1).all(dim=-1)
     mask_v = (gt_vel_root != 0.0).all(dim=-1).all(dim=-1)
-    mask_s = (stationary != -1).any(dim=1).any(dim=1)
-    mask_v = mask_v * mask_s
+    # mask_s = (stationary != -1).any(dim=1).any(dim=1)
+    # mask_v = mask_v * mask_s
     
     if mask_r.any():
         loss_r = criterion(pred_pose_root, gt_pose_root)[mask_r].mean()

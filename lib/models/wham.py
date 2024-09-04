@@ -80,7 +80,7 @@ class Network(nn.Module):
         
         # Return output
         output = {'feet': feet_world,
-                  'contact': self.pred_contact,
+                #   'contact': self.pred_contact,
                   'pose': self.pred_pose, 
                   'betas': self.pred_shape, 
                   'cam': self.pred_cam,
@@ -174,7 +174,8 @@ class Network(nn.Module):
             motion_context = self.integrator(motion_context, img_features)
             
         # Stage 4. Decode SMPL motion
-        pred_pose, pred_shape, pred_cam, pred_contact = self.motion_decoder(motion_context, init_smpl)
+        # pred_pose, pred_shape, pred_cam, pred_contact = self.motion_decoder(motion_context, init_smpl)
+        pred_pose, pred_shape, pred_cam = self.motion_decoder(motion_context, init_smpl)
         # --------- #
         
         # --------- Register predictions --------- #
@@ -184,7 +185,7 @@ class Network(nn.Module):
         self.pred_pose = pred_pose
         self.pred_shape = pred_shape
         self.pred_cam = pred_cam
-        self.pred_contact = pred_contact
+        # self.pred_contact = pred_contact
         # --------- #
         
         # --------- Build SMPL --------- #
@@ -192,10 +193,11 @@ class Network(nn.Module):
         # --------- #
         
         # --------- Refine trajectory --------- #
-        if refine_traj:
-            output = self.refine_trajectory(output, cam_angvel, return_y_up)
-        else:
-            output = self.rollout(output, self.pred_root, self.pred_vel, return_y_up)
+        # if refine_traj:
+        #     output = self.refine_trajectory(output, cam_angvel, return_y_up)
+        # else:
+        #     output = self.rollout(output, self.pred_root, self.pred_vel, return_y_up)
+        output = self.rollout(output, self.pred_root, self.pred_vel, return_y_up)
         # --------- #
         
         return output

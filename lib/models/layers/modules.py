@@ -188,7 +188,8 @@ class MotionDecoder(nn.Module):
         
         # 3d keypoints regressor
         self.regressor = Regressor(
-            d_embed, d_embed, [self.n_pose * 6, 10, 3, 4], self.n_pose * 6, rnn_type, n_layers)
+            # d_embed, d_embed, [self.n_pose * 6, 10, 3, 4], self.n_pose * 6, rnn_type, n_layers)
+            d_embed, d_embed, [self.n_pose * 6, 10, 3], self.n_pose * 6, rnn_type, n_layers)
         
     def forward(self, x, init):
         """ Forward pass of motion decoder.
@@ -199,22 +200,25 @@ class MotionDecoder(nn.Module):
         
         # Recursive prediction of SMPL parameters
         pred_pose_list = [init.reshape(b, 1, -1)]
-        pred_shape_list, pred_cam_list, pred_contact_list = [], [], []
+        # pred_shape_list, pred_cam_list, pred_contact_list = [], [], []
+        pred_shape_list, pred_cam_list = [], []
         
         for i in range(f):
             # Camera coordinate estimation
-            (pred_pose, pred_shape, pred_cam, pred_contact), _, h0 = self.regressor(x[:, [i]], pred_pose_list[-1:], h0)
+            # (pred_pose, pred_shape, pred_cam, pred_contact), _, h0 = self.regressor(x[:, [i]], pred_pose_list[-1:], h0)
+            (pred_pose, pred_shape, pred_cam), _, h0 = self.regressor(x[:, [i]], pred_pose_list[-1:], h0)
             pred_pose_list.append(pred_pose)
             pred_shape_list.append(pred_shape)
             pred_cam_list.append(pred_cam)
-            pred_contact_list.append(pred_contact)
+            # pred_contact_list.append(pred_contact)
             
         pred_pose = torch.cat(pred_pose_list[1:], dim=1).view(b, f, -1)
         pred_shape = torch.cat(pred_shape_list, dim=1).view(b, f, -1)
         pred_cam = torch.cat(pred_cam_list, dim=1).view(b, f, -1)
-        pred_contact = torch.cat(pred_contact_list, dim=1).view(b, f, -1)
+        # pred_contact = torch.cat(pred_contact_list, dim=1).view(b, f, -1)
         
-        return pred_pose, pred_shape, pred_cam, pred_contact
+        # return pred_pose, pred_shape, pred_cam, pred_contact
+        return pred_pose, pred_shape, pred_cam
 
 
 class TrajectoryRefiner(nn.Module):

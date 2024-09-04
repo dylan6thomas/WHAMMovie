@@ -88,14 +88,16 @@ class AMASSDataset(BaseDataset):
         target['pose_root'] = transforms.matrix_to_rotation_6d(pose_root)
         target['init_root'] = target['pose_root'][:1].clone()
         
+        # Hiding contact for ablation
         # GT 3. Foot contact
-        contact = compute_contact_label(target['feet'])
-        if 'tread' in target['vid']:
-            target['contact'] = torch.ones_like(contact) * (-1)
-        else:
-            target['contact'] = contact
+        # contact = compute_contact_label(target['feet'])
+        # if 'tread' in target['vid']:
+        #     target['contact'] = torch.ones_like(contact) * (-1)
+        # else:
+        #     target['contact'] = contact
         
         return target
+    
     
     def forward_smpl(self, target):
         output = self.smpl.get_output(
