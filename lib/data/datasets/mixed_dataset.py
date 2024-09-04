@@ -15,7 +15,7 @@ class DataFactory(torch.utils.data.Dataset):
     def __init__(self, cfg, train_stage='syn'):
         super(DataFactory, self).__init__()
         
-        if train_stage == 'stage1':
+        if train_stage == 'stage1' or train_stage == 'stage1-5':
             self.datasets = [AMASSDataset(cfg)]
             self.dataset_names = ['AMASS']
         elif train_stage == 'stage2':

@@ -209,7 +209,8 @@ class MotionDecoder(nn.Module):
             pred_cam_list.append(pred_cam)
             pred_contact_list.append(pred_contact)
 
-            pred_confidence = torch.sigmoid(pred_confidence)
+            # Changing to withlogits loss
+            # pred_confidence = torch.sigmoid(pred_confidence)
             pred_confidence_list.append(pred_confidence)
             
         pred_pose = torch.cat(pred_pose_list[1:], dim=1).view(b, f, -1)

@@ -65,36 +65,6 @@ class VideoAugmentor():
         mask = (~visible).clone()
 
         return mask
-    
-    def mask2confidence(self, mask):
-        # Maps how missing a mscoco joint means missing a smpl joint
-        mscoco2smpl = {
-            0: [],
-            1: [],
-            2: [],
-            3: [],
-            4: [],
-            5: [16, 13],
-            6: [17, 14],
-            7: [18],
-            8: [19],
-            9: [20, 22],
-            10: [21, 23],
-            11: [1],
-            12: [2],
-            13: [4],
-            14: [5],
-            15: [7,10],
-            16: [8,11]
-        }
-
-        confidence = torch.ones((mask.shape[0],24), dtype=torch.float32)
-
-        for i in range(17):  # Iterate over the keys in mscoco
-            corresponding_columns = mscoco2smpl.get(i, [])
-            confidence[:, corresponding_columns] = torch.where(mask[:, i].reshape(-1, 1) == 1, torch.tensor(0, dtype=torch.float32), confidence[:, corresponding_columns])
-
-        return confidence
 
     def __call__(self, keypoints):
         keypoints += self.get_bias() + self.get_jitter() + self.get_lfhp()

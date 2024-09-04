@@ -33,7 +33,8 @@ class AMASSDataset(BaseDataset):
         label_pth = _C.PATHS.AMASS_LABEL
         super(AMASSDataset, self).__init__(cfg, training=True)
 
-        self.supervise_pose = cfg.TRAIN.STAGE == 'stage1'
+        self.supervise_pose = cfg.TRAIN.STAGE == 'stage1' or cfg.TRAIN.STAGE == 'stage1-5'
+        self.supervise_confidence = cfg.TRAIN.STAGE == 'stage1-5'
         self.labels = joblib.load(label_pth)
         self.SequenceAugmentor = SequenceAugmentor(cfg.DATASET.SEQLEN + 1)
 
@@ -50,7 +51,11 @@ class AMASSDataset(BaseDataset):
         self.img_w, self.img_h = 1000, 1000
         self.get_naive_intrinsics((self.img_w, self.img_h))
         
-        self.CameraAugmentor = CroppedCameraAugmentor(cfg.DATASET.SEQLEN + 1, self.img_w, self.img_h, self.focal_length)
+        if cfg.TRAIN.STAGE == 'stage1-5':
+            self.CameraAugmentor = CroppedCameraAugmentor(cfg.DATASET.SEQLEN + 1, self.img_w, self.img_h, self.focal_length)
+        else:
+            self.CameraAugmentor = CameraAugmentor(cfg.DATASET.SEQLEN + 1, self.img_w, self.img_h, self.focal_length)
+        
         
         
     @property
@@ -63,9 +68,10 @@ class AMASSDataset(BaseDataset):
         
         kp2d = perspective_projection(inpt_kp3d, self.cam_intrinsics)
         mask = self.VideoAugmentor.get_mask()
-        kp2d, bbox = self.keypoints_normalizer(kp2d, target['res'], self.cam_intrinsics, 224, 224)    
+        kp2d, bbox = self.keypoints_normalizer(kp2d, target['res'], self.cam_intrinsics, 224, 224)   
 
-        conf_mask = (~target['confidence'][:,:self.n_joints]).clone()
+        if self.supervise_confidence:
+            conf_mask = (~target['confidence'][:,:self.n_joints]).clone()
         
         target['bbox'] = bbox[1:]
         target['kp2d'] = kp2d
@@ -73,7 +79,9 @@ class AMASSDataset(BaseDataset):
         # print("KP3D SHAPE: ", inpt_kp3d.shape)
         # print("GT KP3D SHAPE: ", gt_kp3d.shape)
         target['mask'] = mask[1:]
-        target['conf_mask'] = conf_mask[1:]
+
+        if self.supervise_confidence:
+            target['conf_mask'] = conf_mask[1:]
         
         target['features'] = torch.zeros((self.SMPLAugmentor.n_frames, self.d_img_feature)).float()
         return target

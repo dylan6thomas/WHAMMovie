@@ -518,6 +518,6 @@ def out_of_frame_loss(
         gt_conf,
 ):
     if (gt_conf > 0).any():
-        return F.binary_cross_entropy(pred_conf, gt_conf.float())
+        return F.binary_cross_entropy_with_logits(pred_conf, gt_conf.float())
     else:
         return torch.tensor(0)
